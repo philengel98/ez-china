@@ -20,6 +20,10 @@ function getErrorMessage(error: unknown): string {
     return JSON.stringify(error);
 }
 
+function isMobileBrowser(): boolean {
+    return /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+}
+
 function webSpeechErrorMessage(error: string): string {
     switch (error) {
         case 'not-allowed':
@@ -37,6 +41,7 @@ function webSpeechErrorMessage(error: string): string {
 export class SpeechRecognizer {
     private readonly lang: string;
     private latestMatch: string | null = null;
+    private runtimeError: Error | null = null;
     private partialResultsHandle: PluginListenerHandle | null = null;
     private listeningStateHandle: PluginListenerHandle | null = null;
     private volumeHandle: PluginListenerHandle | null = null;
@@ -210,19 +215,20 @@ export class SpeechRecognizer {
 
         this.webRecognizer.onerror = (event: any) => {
             void Logger.log(`Web Speech error: ${event.error}`);
-            // 'network' in Chrome means Google's speech servers are unreachable
-            // (typical behind the Great Firewall).  Tell the user to switch to Safari.
-            if (event.error === 'network') {
+            // Store runtime errors (errors that fire after onstart) so stopListening
+            // can throw them instead of silently returning a null transcript.
+            if (event.error === 'network' || event.error === 'audio-capture') {
+                this.runtimeError = new Error(webSpeechErrorMessage(event.error));
                 this.onListeningStateChange?.('stopped');
                 this.webRecognizer?.abort();
             }
         };
 
-        // NOTE: Do NOT call startWebVolumeMetering() here. On iOS Safari the speech
-        // recognition API internally acquires the microphone; calling getUserMedia
-        // first causes an audio-capture conflict that prevents recognition from
-        // starting. Volume metering is started inside onstart, after the speech API
-        // has successfully opened the mic.
+        // NOTE: Do NOT call startWebVolumeMetering() on mobile browsers. On iOS
+        // Safari, calling getUserMedia while webkitSpeechRecognition is active causes
+        // an audio-capture error that silently kills the recognizer — onend fires with
+        // no transcript, so the user sees "Speech not recognized." On desktop browsers
+        // (Chrome/Safari) the two APIs share mic access without conflict.
 
         return new Promise<void>((resolve, reject) => {
             let started = false;
@@ -234,8 +240,11 @@ export class SpeechRecognizer {
                 if (this.pendingStop) {
                     this.webRecognizer?.stop();
                 }
-                // Start volume metering now that the speech API owns the mic.
-                void this.startWebVolumeMetering();
+                // Volume metering: desktop only. On mobile, getUserMedia conflicts with
+                // the speech API's exclusive mic ownership and breaks recognition.
+                if (!isMobileBrowser()) {
+                    void this.startWebVolumeMetering();
+                }
                 resolve();
             };
 
@@ -321,7 +330,11 @@ export class SpeechRecognizer {
         }
 
         const result = this.latestMatch;
+        const err = this.runtimeError;
         await this.dispose();
+        // Throw any error that fired after start (network, audio-capture, etc.)
+        // so the caller sees a meaningful message instead of a silent null result.
+        if (err) throw err;
         return result;
     }
 
@@ -357,6 +370,7 @@ export class SpeechRecognizer {
         this.engineStartedResolve = null;
         this.engineStartedPromise = null;
         this.pendingStop = false;
+        this.runtimeError = null;
 
         // Clean up native listeners
         if (this.partialResultsHandle) {
