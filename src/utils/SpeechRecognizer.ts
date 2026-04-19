@@ -20,6 +20,20 @@ function getErrorMessage(error: unknown): string {
     return JSON.stringify(error);
 }
 
+function webSpeechErrorMessage(error: string): string {
+    switch (error) {
+        case 'not-allowed':
+        case 'service-not-allowed':
+            return 'Microphone access denied. Please allow microphone access and try again.\n请允许麦克风权限后重试。';
+        case 'audio-capture':
+            return 'Microphone is unavailable. Please check that no other app is using it.\n麦克风不可用，请检查其他应用是否正在使用麦克风。';
+        case 'network':
+            return 'Network error — speech recognition requires an internet connection.\n网络错误，语音识别需要网络连接。';
+        default:
+            return `Speech recognition error: ${error}`;
+    }
+}
+
 export class SpeechRecognizer {
     private readonly lang: string;
     private latestMatch: string | null = null;
@@ -175,14 +189,6 @@ export class SpeechRecognizer {
         this.webRecognizer.continuous = true;
         this.webRecognizer.maxAlternatives = 1;
 
-        this.webRecognizer.onstart = () => {
-            void Logger.log('Web Speech started');
-            this.onListeningStateChange?.('started');
-            if (this.pendingStop) {
-                this.webRecognizer?.stop();
-            }
-        };
-
         this.webRecognizer.onresult = (event: any) => {
             for (let i = event.resultIndex; i < event.results.length; ++i) {
                 const transcript = event.results[i][0].transcript.trim();
@@ -212,22 +218,38 @@ export class SpeechRecognizer {
             }
         };
 
-        await this.startWebVolumeMetering();
+        // NOTE: Do NOT call startWebVolumeMetering() here. On iOS Safari the speech
+        // recognition API internally acquires the microphone; calling getUserMedia
+        // first causes an audio-capture conflict that prevents recognition from
+        // starting. Volume metering is started inside onstart, after the speech API
+        // has successfully opened the mic.
 
         return new Promise<void>((resolve, reject) => {
-            const origStart = this.webRecognizer.onstart;
+            let started = false;
+
             this.webRecognizer.onstart = () => {
-                origStart?.();
+                started = true;
+                void Logger.log('Web Speech started');
+                this.onListeningStateChange?.('started');
+                if (this.pendingStop) {
+                    this.webRecognizer?.stop();
+                }
+                // Start volume metering now that the speech API owns the mic.
+                void this.startWebVolumeMetering();
                 resolve();
             };
+
             const origError = this.webRecognizer.onerror;
             this.webRecognizer.onerror = (event: any) => {
                 origError?.(event);
-                // Reject only for fatal errors before start
-                if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-                    reject(new Error(`Microphone access denied: ${event.error}`));
+                // Reject the start promise for any error that fires before onstart.
+                // Previously only not-allowed/service-not-allowed were handled here,
+                // leaving audio-capture, network, and other errors as silent hangs.
+                if (!started) {
+                    reject(new Error(webSpeechErrorMessage(event.error)));
                 }
             };
+
             try {
                 this.webRecognizer.start();
             } catch (e) {

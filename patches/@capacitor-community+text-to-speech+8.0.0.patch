@@ -1,13 +1,15 @@
 diff --git a/node_modules/@capacitor-community/text-to-speech/android/src/main/java/com/getcapacitor/community/tts/TextToSpeechPlugin.java b/node_modules/@capacitor-community/text-to-speech/android/src/main/java/com/getcapacitor/community/tts/TextToSpeechPlugin.java
-index 1234567..abcdefg 100644
+index 62eaf01..c6e4a51 100644
 --- a/node_modules/@capacitor-community/text-to-speech/android/src/main/java/com/getcapacitor/community/tts/TextToSpeechPlugin.java
 +++ b/node_modules/@capacitor-community/text-to-speech/android/src/main/java/com/getcapacitor/community/tts/TextToSpeechPlugin.java
-@@ -43,9 +43,13 @@ public class TextToSpeechPlugin extends Plugin {
+@@ -40,10 +40,15 @@ public class TextToSpeechPlugin extends Plugin {
+         int voice = call.getInt("voice", -1);
+         int queueStrategy = call.getInt("queueStrategy", 0);
+
 -        boolean isLanguageSupported = implementation.isLanguageSupported(lang);
 -        if (!isLanguageSupported) {
 -            call.reject(ERROR_UNSUPPORTED_LANGUAGE);
 -            return;
--        }
 +        // Try the exact locale first; if not fully supported, fall back to the base language
 +        // (e.g. "zh" instead of "zh-CN") so the OS TTS engine can still attempt speech.
 +        // Strict rejection here would break Chinese output on devices without a downloaded voice pack.
@@ -17,4 +19,6 @@ index 1234567..abcdefg 100644
 +                lang = baseLang;
 +            }
 +            // If neither locale is supported, attempt anyway — the TTS engine may still produce audio.
-+        }
+         }
+
+         SpeakResultCallback resultCallback = new SpeakResultCallback() {
