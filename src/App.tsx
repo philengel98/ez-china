@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { ArrowUpDown, Mic } from 'lucide-react';
 import BottomButtons from './components/BottomButtons';
 import TranslationOverlay from './components/TranslationOverlay';
 import QuickPhrases from './components/QuickPhrases';
@@ -17,6 +18,13 @@ interface RecognitionSession {
   targetLang: string;
 }
 
+interface Translation {
+  original: string;
+  translated: string;
+  from: LanguageCode;
+  to: LanguageCode;
+}
+
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error) {
     return error.message;
@@ -25,13 +33,14 @@ function getErrorMessage(error: unknown): string {
 }
 
 function App() {
-  const [translation, setTranslation] = useState<{ original: string, translated: string } | null>(null);
+  const [translation, setTranslation] = useState<Translation | null>(null);
   const [isListening, setIsListening] = useState<boolean>(false);
   const [activeLang, setActiveLang] = useState<LanguageCode | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pendingTranscript, setPendingTranscript] = useState<string | null>(null);
   const [isTranslating, setIsTranslating] = useState<boolean>(false);
   const [volume, setVolume] = useState<number>(0);
+  const [dialogueMode, setDialogueMode] = useState<boolean>(false);
 
   const recognizerRef = useRef<SpeechRecognizer | null>(null);
   const sessionRef = useRef<RecognitionSession | null>(null);
@@ -136,7 +145,7 @@ function App() {
         silenceTimerRef.current = window.setTimeout(() => {
           void Logger.log('Auto-stopping due to silence (unhold mode)');
           void stopRecognitionSession('natural');
-        }, 2500); // 2.5s of no activity to auto-stop
+        }, 2500);
       };
 
       await recognizer.startListening({
@@ -186,7 +195,7 @@ function App() {
 
     try {
       spokenText = await recognizer.stopListening();
-      
+
       recognizerRef.current = null;
       sessionRef.current = null;
       latestTranscriptRef.current = spokenText;
@@ -215,6 +224,8 @@ function App() {
       setTranslation({
         original: spokenText,
         translated,
+        from: session.from,
+        to: session.to,
       });
 
       window.setTimeout(() => {
@@ -238,15 +249,177 @@ function App() {
   const handleQuickPhrase = async (phrase: { de: string, zh: string }) => {
     setTranslation({
       original: phrase.de,
-      translated: phrase.zh
+      translated: phrase.zh,
+      from: 'de',
+      to: 'zh',
     });
     window.setTimeout(() => {
       void TextToSpeech.speak(phrase.zh, 'zh-CN');
     }, 300);
   };
 
+  const isBusy = isTranslating || stopInFlightRef.current;
+
+  // ─── Dialogue mode ────────────────────────────────────────────────────────
+
+  if (dialogueMode) {
+    const btnBase =
+      'relative w-24 h-24 rounded-full flex flex-col items-center justify-center ' +
+      'transition-all duration-500 transform active:scale-90 shrink-0';
+    const btnActive =
+      'bg-red-600 scale-110 shadow-[0_0_60px_rgba(220,38,38,0.5)] text-white';
+    const btnIdle =
+      'bg-zinc-900 border border-zinc-700 text-white';
+    const btnDisabled = 'opacity-30 cursor-not-allowed';
+
+    const zhActive  = isListening && activeLang === 'zh';
+    const deActive  = isListening && activeLang === 'de';
+    const zhDisabled = isBusy || (isListening && activeLang !== 'zh');
+    const deDisabled = isBusy || (isListening && activeLang !== 'de');
+
+    const handleZH = () => {
+      if (isBusy) return;
+      if (isListening) { void stopRecognitionSession('user'); }
+      else { void startRecognitionSession('zh'); }
+    };
+    const handleDE = () => {
+      if (isBusy) return;
+      if (isListening) { void stopRecognitionSession('user'); }
+      else { void startRecognitionSession('de'); }
+    };
+
+    // Translation text for each side
+    const zhTranslation = translation?.to === 'zh' ? translation : null;
+    const deTranslation = translation?.to === 'de' ? translation : null;
+
+    return (
+      <div className="flex flex-col h-screen w-screen bg-black text-white overflow-hidden select-none">
+
+        {/* Error — floats over the divider */}
+        {error && (
+          <div className="absolute inset-x-0 top-1/2 z-50 flex justify-center -translate-y-1/2 px-6 pointer-events-none">
+            <div className="bg-red-500/10 border border-red-500/20 px-6 py-3 rounded-2xl text-center shadow-2xl">
+              <span className="text-red-400 text-xs font-black uppercase tracking-widest whitespace-pre-line">{error}</span>
+            </div>
+          </div>
+        )}
+
+        {/* ── TOP HALF — Chinese person's side (rotated 180°) ── */}
+        <div className="flex-1 rotate-180 flex flex-col items-center justify-between px-8 py-8 overflow-hidden min-h-0">
+
+          {/* CN button — Chinese person sees this at their TOP */}
+          <button
+            onClick={handleZH}
+            disabled={zhDisabled}
+            aria-label="Translate Chinese to German"
+            className={`${btnBase} ${zhActive ? btnActive : btnIdle} ${zhDisabled ? btnDisabled : ''}`}
+          >
+            <div className="text-xs font-black mb-1">CN</div>
+            <Mic size={24} className={zhActive ? 'animate-pulse' : ''} />
+            <div className="text-[8px] mt-1 font-bold opacity-60">➜ DE</div>
+            {zhActive && (
+              <div className="absolute inset-0 rounded-full border-2 border-white/20 animate-ping" />
+            )}
+          </button>
+
+          {/* Content — Chinese person sees this below their button */}
+          <div className="flex-1 flex flex-col items-center justify-center space-y-4 w-full py-4 min-h-0">
+            {zhActive && (
+              <SoundWave volume={volume} isListening={true} />
+            )}
+            {zhActive && pendingTranscript && (
+              <div className="bg-zinc-900 border border-zinc-800 px-5 py-3 rounded-2xl text-center max-w-xs">
+                <span className="text-white text-base font-bold">{pendingTranscript}</span>
+              </div>
+            )}
+            {zhTranslation && !isListening && (
+              <div className="text-center space-y-2 px-4 animate-in fade-in duration-500">
+                <p className="text-zinc-600 text-[10px] uppercase tracking-[0.4em] font-black">Translation</p>
+                <p className="text-white text-4xl font-black leading-tight">{zhTranslation.translated}</p>
+                <p className="text-zinc-600 text-sm italic mt-1">"{zhTranslation.original}"</p>
+              </div>
+            )}
+            {!isListening && !zhTranslation && (
+              <p className="text-zinc-800 text-[10px] tracking-[0.5em] font-black uppercase animate-pulse">
+                中文 · Chinese
+              </p>
+            )}
+          </div>
+        </div>
+
+        {/* ── DIVIDER ── */}
+        <div className="shrink-0 border-t border-b border-zinc-800/60 flex items-center justify-center py-2">
+          <button
+            onClick={() => setDialogueMode(false)}
+            className="flex items-center space-x-1.5 px-3 py-1 bg-zinc-950 border border-zinc-800 rounded-full text-zinc-600 text-[10px] font-black uppercase tracking-widest hover:text-zinc-400 hover:border-zinc-700 transition-colors"
+          >
+            <ArrowUpDown size={10} />
+            <span>Exit Dialogue</span>
+          </button>
+        </div>
+
+        {/* ── BOTTOM HALF — German person's side ── */}
+        <div className="flex-1 flex flex-col items-center justify-between px-8 py-8 overflow-hidden min-h-0">
+
+          {/* Content — German person sees this above their button */}
+          <div className="flex-1 flex flex-col items-center justify-center space-y-4 w-full py-4 min-h-0">
+            {deActive && (
+              <SoundWave volume={volume} isListening={true} />
+            )}
+            {deActive && pendingTranscript && (
+              <div className="bg-zinc-900 border border-zinc-800 px-5 py-3 rounded-2xl text-center max-w-xs">
+                <span className="text-white text-base font-bold">{pendingTranscript}</span>
+              </div>
+            )}
+            {deTranslation && !isListening && (
+              <div className="text-center space-y-2 px-4 animate-in fade-in duration-500">
+                <p className="text-zinc-600 text-[10px] uppercase tracking-[0.4em] font-black">Translation</p>
+                <p className="text-white text-4xl font-black leading-tight">{deTranslation.translated}</p>
+                <p className="text-zinc-600 text-sm italic mt-1">"{deTranslation.original}"</p>
+              </div>
+            )}
+            {!isListening && !deTranslation && (
+              <p className="text-zinc-800 text-[10px] tracking-[0.5em] font-black uppercase animate-pulse">
+                Deutsch · German
+              </p>
+            )}
+          </div>
+
+          {/* DE button — German person sees this at their BOTTOM */}
+          <button
+            onClick={handleDE}
+            disabled={deDisabled}
+            aria-label="Translate German to Chinese"
+            className={`${btnBase} ${deActive ? btnActive : btnIdle} ${deDisabled ? btnDisabled : ''}`}
+          >
+            <div className="text-xs font-black mb-1">DE</div>
+            <Mic size={24} className={deActive ? 'animate-pulse' : ''} />
+            <div className="text-[8px] mt-1 font-bold opacity-60">➜ ZH</div>
+            {deActive && (
+              <div className="absolute inset-0 rounded-full border-2 border-white/20 animate-ping" />
+            )}
+          </button>
+        </div>
+
+      </div>
+    );
+  }
+
+  // ─── Normal mode ──────────────────────────────────────────────────────────
+
   return (
     <div className="flex flex-col h-screen w-screen bg-black text-white overflow-hidden relative font-sans select-none safe-bottom">
+
+      {/* Dialogue mode toggle */}
+      <button
+        onClick={() => setDialogueMode(true)}
+        className="absolute top-4 right-4 z-10 w-9 h-9 flex items-center justify-center rounded-full bg-zinc-900 border border-zinc-800 text-zinc-500 hover:text-zinc-300 hover:border-zinc-700 transition-colors"
+        aria-label="Enter dialogue mode"
+        title="Dialogue mode — place phone between two people"
+      >
+        <ArrowUpDown size={16} />
+      </button>
+
       <main className="flex-1 flex flex-col items-center pt-16 px-6 overflow-y-auto">
         {translation && (
           <TranslationOverlay
@@ -264,7 +437,7 @@ function App() {
               Ready to Translate
             </div>
             <QuickPhrases onPhraseClick={handleQuickPhrase} />
-            <button 
+            <button
               onClick={() => TextToSpeech.speak("Test audio engine. One, two, three.", "en-US")}
               className="mt-8 px-6 py-2 border border-blue-500/30 text-blue-400 rounded-full text-xs font-bold uppercase tracking-widest active:scale-95 transition-transform"
             >
@@ -313,7 +486,7 @@ function App() {
           onStop={() => stopRecognitionSession('user')}
           isListening={isListening}
           activeLang={activeLang}
-          isBusy={isTranslating || stopInFlightRef.current}
+          isBusy={isBusy}
         />
       </div>
     </div>
