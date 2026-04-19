@@ -1,0 +1,39 @@
+@import "tailwindcss";
+
+@theme {
+  /* No Google Fonts — fully system-font stack that works offline and in China.
+     iOS: SF Pro (Latin) + PingFang SC (CJK)
+     Android Chinese OEMs: device system font (always supports CJK)
+     Other Android / Desktop: falls back through Noto → generic sans-serif */
+  --font-sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB",
+               "Noto Sans SC", "Microsoft YaHei", "Heiti SC", system-ui, sans-serif;
+}
+
+:root {
+  background-color: #000;
+  color: white;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  display: flex;
+  min-width: 320px;
+  min-height: 100vh;
+  overflow: hidden;
+  background-color: black;
+}
+
+[lang="zh-CN"] {
+  font-family: "Noto Sans SC", sans-serif !important;
+}
+
+.safe-top {
+  padding-top: env(safe-area-inset-top);
+}
+
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}

@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Ez China AI</string>
+    <string name="title_activity_main">Ez China AI</string>
+    <string name="package_name">com.getcapacitor.community.speechrecognition</string>
+    <string name="custom_url_scheme">com.getcapacitor.community.speechrecognition</string>
+</resources>
