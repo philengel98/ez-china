@@ -53,10 +53,6 @@ function App() {
 
   useEffect(() => {
     TextToSpeech.preWarm();
-    // Pre-warm microphone permission on desktop so the first tap works instantly
-    // instead of racing against the browser permission dialog.
-    // On iOS this is a no-op (getUserMedia requires a user gesture), which is fine.
-    void SpeechRecognizer.requestPermissions();
   }, []);
 
   useEffect(() => {
@@ -283,11 +279,15 @@ function App() {
 
     const handleZH = () => {
       if (isBusy) return;
+      // Unlock TTS synchronously inside the gesture handler so iOS Safari allows
+      // the later async speechSynthesis.speak() call (from the silence timer).
+      TextToSpeech.unlock();
       if (isListening) { void stopRecognitionSession('user'); }
       else { void startRecognitionSession('zh'); }
     };
     const handleDE = () => {
       if (isBusy) return;
+      TextToSpeech.unlock();
       if (isListening) { void stopRecognitionSession('user'); }
       else { void startRecognitionSession('de'); }
     };
@@ -316,7 +316,15 @@ function App() {
         )}
 
         {/* ── TOP HALF — Chinese person's side (rotated 180°) ── */}
-        <div className="flex-1 rotate-180 flex flex-col items-center justify-between px-8 py-8 overflow-hidden min-h-0">
+        {/* After rotation, paddingTop = physical bottom (home indicator) and
+            paddingBottom = physical top (status bar / notch). */}
+        <div
+          className="flex-1 rotate-180 flex flex-col items-center justify-between px-8 overflow-hidden min-h-0"
+          style={{
+            paddingTop: 'max(2rem, env(safe-area-inset-bottom))',
+            paddingBottom: 'max(2rem, env(safe-area-inset-top))',
+          }}
+        >
 
           {/* CN button — Chinese person sees this at their TOP */}
           <button
@@ -371,7 +379,14 @@ function App() {
         </div>
 
         {/* ── BOTTOM HALF — German person's side ── */}
-        <div className="flex-1 flex flex-col items-center justify-between px-8 py-8 overflow-hidden min-h-0">
+        {/* paddingBottom must clear the home indicator bar. */}
+        <div
+          className="flex-1 flex flex-col items-center justify-between px-8 overflow-hidden min-h-0"
+          style={{
+            paddingTop: '2rem',
+            paddingBottom: 'max(2rem, env(safe-area-inset-bottom))',
+          }}
+        >
 
           {/* Content — German person sees this above their button */}
           <div className="flex-1 flex flex-col items-center justify-center space-y-4 w-full py-4 min-h-0">
@@ -488,8 +503,8 @@ function App() {
 
       <div className="px-6 py-12 w-full max-w-lg mx-auto flex justify-center">
         <BottomButtons
-          onStartDE={() => startRecognitionSession('de')}
-          onStartZH={() => startRecognitionSession('zh')}
+          onStartDE={() => { TextToSpeech.unlock(); void startRecognitionSession('de'); }}
+          onStartZH={() => { TextToSpeech.unlock(); void startRecognitionSession('zh'); }}
           onStop={() => stopRecognitionSession('user')}
           isListening={isListening}
           activeLang={activeLang}

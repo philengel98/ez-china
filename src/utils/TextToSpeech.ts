@@ -152,6 +152,24 @@ function splitSentences(text: string): string[] {
 // ---------------------------------------------------------------------------
 
 export class TextToSpeech {
+    /**
+     * Unlock the Web Speech Synthesis API for programmatic use on iOS Safari.
+     *
+     * iOS requires speechSynthesis.speak() to be called synchronously inside a
+     * user-gesture handler at least once before it will allow async / timer-driven
+     * calls to produce audio.  Call this at the top of every mic-button onClick,
+     * before any awaits, to prime the audio context for the session.
+     *
+     * On non-iOS browsers and on native this is a no-op.
+     */
+    static unlock(): void {
+        if (Capacitor.getPlatform() !== 'web') return;
+        if (!('speechSynthesis' in window)) return;
+        const u = new SpeechSynthesisUtterance('');
+        u.volume = 0;
+        window.speechSynthesis.speak(u);
+    }
+
     static async preWarm(): Promise<void> {
         if (Capacitor.getPlatform() === 'web') {
             if ('speechSynthesis' in window) {
