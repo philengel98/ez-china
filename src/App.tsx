@@ -304,7 +304,7 @@ function App() {
       : null;
 
     return (
-      <div className="flex flex-col h-screen w-screen bg-black text-white overflow-hidden select-none">
+      <div className="flex flex-col w-screen bg-black text-white overflow-hidden select-none" style={{ height: '100svh' }}>
 
         {/* Error — floats over the divider */}
         {error && (
@@ -436,7 +436,7 @@ function App() {
   // ─── Normal mode ──────────────────────────────────────────────────────────
 
   return (
-    <div className="flex flex-col h-screen w-screen bg-black text-white overflow-hidden relative font-sans select-none safe-bottom">
+    <div className="flex flex-col w-screen bg-black text-white overflow-hidden relative font-sans select-none safe-bottom" style={{ height: '100svh' }}>
 
       {/* Dialogue mode toggle */}
       <button
