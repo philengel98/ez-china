@@ -53,6 +53,10 @@ function App() {
 
   useEffect(() => {
     TextToSpeech.preWarm();
+    // Pre-warm microphone permission on desktop so the first tap works instantly
+    // instead of racing against the browser permission dialog.
+    // On iOS this is a no-op (getUserMedia requires a user gesture), which is fine.
+    void SpeechRecognizer.requestPermissions();
   }, []);
 
   useEffect(() => {
@@ -288,9 +292,16 @@ function App() {
       else { void startRecognitionSession('de'); }
     };
 
-    // Translation text for each side
-    const zhTranslation = translation?.to === 'zh' ? translation : null;
-    const deTranslation = translation?.to === 'de' ? translation : null;
+    // Extract each language's text from the last translation, regardless of
+    // direction.  Both halves always show something after any translation:
+    //   Chinese side → Chinese text big  + German text small (for reference)
+    //   German  side → German  text big  + Chinese text small (for reference)
+    const chineseText = translation
+      ? translation.to === 'zh' ? translation.translated : translation.original
+      : null;
+    const germanText = translation
+      ? translation.to === 'de' ? translation.translated : translation.original
+      : null;
 
     return (
       <div className="flex flex-col h-screen w-screen bg-black text-white overflow-hidden select-none">
@@ -332,14 +343,15 @@ function App() {
                 <span className="text-white text-base font-bold">{pendingTranscript}</span>
               </div>
             )}
-            {zhTranslation && !isListening && (
-              <div className="text-center space-y-2 px-4 animate-in fade-in duration-500">
-                <p className="text-zinc-600 text-[10px] uppercase tracking-[0.4em] font-black">Translation</p>
-                <p className="text-white text-4xl font-black leading-tight">{zhTranslation.translated}</p>
-                <p className="text-zinc-600 text-sm italic mt-1">"{zhTranslation.original}"</p>
+            {chineseText && !isListening && (
+              <div className="text-center space-y-3 px-4 animate-in fade-in duration-500">
+                <p className="text-white text-4xl font-black leading-tight" lang="zh-CN">{chineseText}</p>
+                {germanText && (
+                  <p className="text-zinc-500 text-sm italic">"{germanText}"</p>
+                )}
               </div>
             )}
-            {!isListening && !zhTranslation && (
+            {!isListening && !chineseText && (
               <p className="text-zinc-800 text-[10px] tracking-[0.5em] font-black uppercase animate-pulse">
                 中文 · Chinese
               </p>
@@ -371,14 +383,15 @@ function App() {
                 <span className="text-white text-base font-bold">{pendingTranscript}</span>
               </div>
             )}
-            {deTranslation && !isListening && (
-              <div className="text-center space-y-2 px-4 animate-in fade-in duration-500">
-                <p className="text-zinc-600 text-[10px] uppercase tracking-[0.4em] font-black">Translation</p>
-                <p className="text-white text-4xl font-black leading-tight">{deTranslation.translated}</p>
-                <p className="text-zinc-600 text-sm italic mt-1">"{deTranslation.original}"</p>
+            {germanText && !isListening && (
+              <div className="text-center space-y-3 px-4 animate-in fade-in duration-500">
+                <p className="text-white text-4xl font-black leading-tight" lang="de">{germanText}</p>
+                {chineseText && (
+                  <p className="text-zinc-500 text-sm italic" lang="zh-CN">"{chineseText}"</p>
+                )}
               </div>
             )}
-            {!isListening && !deTranslation && (
+            {!isListening && !germanText && (
               <p className="text-zinc-800 text-[10px] tracking-[0.5em] font-black uppercase animate-pulse">
                 Deutsch · German
               </p>

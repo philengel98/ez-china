@@ -58,6 +58,12 @@ export class SpeechRecognizer {
     private webAudioContext: AudioContext | null = null;
     private webAudioStream: MediaStream | null = null;
     private webVolumeAnimFrame: number | null = null;
+    // no-speech auto-restart state
+    private webNoSpeechRestarts: number = 0;
+    private webLastErrorWasNoSpeech: boolean = false;
+    // set before intentional stop so onend doesn't trigger a restart
+    private webIntentionalStop: boolean = false;
+    private static readonly MAX_NO_SPEECH_RESTARTS = 12; // ~84 s of tolerated silence
 
     constructor(lang: string) {
         this.lang = lang;
@@ -208,13 +214,47 @@ export class SpeechRecognizer {
         };
 
         this.webRecognizer.onend = () => {
-            void Logger.log('Web Speech ended');
-            this.onListeningStateChange?.('stopped');
+            // Auto-restart when no-speech fired: the engine timed out waiting for
+            // speech (common on first open, or in noisy environments). As long as the
+            // user hasn't intentionally stopped and we haven't hit the retry cap, just
+            // kick the recognizer again without surfacing an error to the UI.
+            if (
+                this.webLastErrorWasNoSpeech &&
+                !this.webIntentionalStop &&
+                this.webRecognizer !== null &&
+                this.webNoSpeechRestarts < SpeechRecognizer.MAX_NO_SPEECH_RESTARTS
+            ) {
+                this.webLastErrorWasNoSpeech = false;
+                this.webNoSpeechRestarts++;
+                void Logger.log(`Web Speech no-speech restart #${this.webNoSpeechRestarts}`);
+                try {
+                    this.webRecognizer.start();
+                    return; // don't fire 'stopped'
+                } catch (e) {
+                    void Logger.log(`Restart failed: ${e}`);
+                    // fall through to normal end handling
+                }
+            }
+            this.webLastErrorWasNoSpeech = false;
+            // Only fire the state-change callback if we weren't the ones who
+            // intentionally stopped (avoids double-triggering stopRecognitionSession).
+            if (!this.webIntentionalStop) {
+                void Logger.log('Web Speech ended naturally');
+                this.onListeningStateChange?.('stopped');
+            }
             this.stopWebVolumeMetering();
         };
 
         this.webRecognizer.onerror = (event: any) => {
             void Logger.log(`Web Speech error: ${event.error}`);
+
+            // no-speech: the engine didn't detect any speech before its internal
+            // timeout. Set a flag so onend knows to restart rather than fail.
+            if (event.error === 'no-speech') {
+                this.webLastErrorWasNoSpeech = true;
+                return; // onend will handle the restart
+            }
+
             // Store runtime errors (errors that fire after onstart) so stopListening
             // can throw them instead of silently returning a null transcript.
             if (event.error === 'network' || event.error === 'audio-capture') {
@@ -269,7 +309,15 @@ export class SpeechRecognizer {
 
     private async startWebVolumeMetering(): Promise<void> {
         try {
-            this.webAudioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            // Request noise suppression + echo cancellation so volume readings
+            // stay clean in loud environments and don't bleed into the recognizer.
+            this.webAudioStream = await navigator.mediaDevices.getUserMedia({
+                audio: {
+                    noiseSuppression: true,
+                    echoCancellation: true,
+                    autoGainControl: true,
+                },
+            });
             const AudioContextCtor = window.AudioContext || (window as any).webkitAudioContext;
             const audioContext = new AudioContextCtor();
             const source = audioContext.createMediaStreamSource(this.webAudioStream);
@@ -311,6 +359,9 @@ export class SpeechRecognizer {
         await Logger.log('Stopping speech recognition session...');
 
         if (Capacitor.getPlatform() === 'web') {
+            // Mark as intentional before calling stop() so the onend handler
+            // doesn't try to restart for no-speech.
+            this.webIntentionalStop = true;
             if (this.webRecognizer) {
                 this.webRecognizer.stop();
             }
@@ -345,6 +396,7 @@ export class SpeechRecognizer {
             this.engineStartedResolve = null;
         }
         if (Capacitor.getPlatform() === 'web') {
+            this.webIntentionalStop = true;
             this.webRecognizer?.abort();
         } else {
             try {
@@ -371,6 +423,9 @@ export class SpeechRecognizer {
         this.engineStartedPromise = null;
         this.pendingStop = false;
         this.runtimeError = null;
+        this.webNoSpeechRestarts = 0;
+        this.webLastErrorWasNoSpeech = false;
+        this.webIntentionalStop = false;
 
         // Clean up native listeners
         if (this.partialResultsHandle) {
